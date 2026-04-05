@@ -1,8 +1,9 @@
+
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>歌词编辑器 - v73 Apple Music TTML 标准格式</title>
+    <title>歌词编辑器-TTML/LRC/ELRC V1.0.0</title>
     <style>
         :root {
             --primary: #1db954;    /* Spotify 绿 */
@@ -192,13 +193,29 @@
         .modal-footer { padding: 15px 25px; border-top: 1.5px solid #f5f5f5; display: flex; justify-content: flex-end; gap: 12px; }
 
         .eol-hint { color: var(--highlight); font-size: 12px; margin-left: 8px; border: 1px solid var(--highlight); padding: 1px 5px; border-radius: 4px; font-weight: bold; background: var(--highlight-bg); }
+
+        /* 快捷键信息按钮 */
+        .info-btn { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.35); background: transparent; color: rgba(255,255,255,0.5); font-size: 11px; font-weight: 700; font-style: italic; font-family: Georgia, serif; cursor: pointer; transition: 0.2s; margin-left: 6px; vertical-align: middle; line-height: 1; padding: 0; }
+        .info-btn:hover { border-color: var(--primary); color: var(--primary); background: rgba(29,185,84,0.1); }
+
+        /* 快捷键弹窗 */
+        #shortcutModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 10001; }
+        .shortcut-content { background: #1e1e1e; color: #eee; width: 380px; border-radius: 14px; padding: 28px 30px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
+        .shortcut-content h3 { margin: 0 0 18px 0; font-size: 16px; color: var(--primary); text-align: center; font-weight: 700; }
+        .shortcut-list { display: flex; flex-direction: column; gap: 10px; }
+        .shortcut-row { display: flex; align-items: center; justify-content: space-between; }
+        .shortcut-key { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; height: 28px; padding: 0 8px; background: #333; border: 1px solid #555; border-radius: 6px; font-family: 'Consolas', monospace; font-size: 12px; font-weight: 600; color: #fff; box-shadow: 0 2px 0 #222; }
+        .shortcut-desc { font-size: 13px; color: #bbb; }
+        .shortcut-close { margin-top: 20px; text-align: center; }
+        .shortcut-close button { background: var(--primary); color: white; border: none; padding: 8px 28px; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; }
+        .shortcut-close button:hover { filter: brightness(1.15); }
     </style>
 </head>
 <body>
 
     <div class="sidebar">
         <div class="top-controls">
-            <h2>歌词编辑器</h2>
+            <h2>歌词编辑器 <span style="font-size:11px; font-weight:400; opacity:0.6;">V1.0.0</span> <button class="info-btn" onclick="toggleShortcutModal()" title="快捷键帮助">i</button></h2>
             <div class="mode-switch-group">
                 <div class="format-selector" id="formatSelector">
                     <div class="format-option active-lrc" id="fmtLrc" onclick="setFormat('LRC')">LRC</div>
@@ -283,11 +300,32 @@
 
     <audio id="audio" style="display:none"></audio>
 
+    <!-- 快捷键帮助弹窗 -->
+    <div id="shortcutModal" onclick="if(event.target===this)toggleShortcutModal()">
+        <div class="shortcut-content">
+            <h3>⌨️ 快捷键一览</h3>
+            <div class="shortcut-list">
+                <div class="shortcut-row"><span class="shortcut-desc">打时间标记 / 逐字打点</span><span class="shortcut-key">Space</span></div>
+                <div class="shortcut-row"><span class="shortcut-desc">播放 / 暂停</span><span class="shortcut-key">P</span></div>
+                <div class="shortcut-row"><span class="shortcut-desc">快退 5 秒</span><span class="shortcut-key">←</span></div>
+                <div class="shortcut-row"><span class="shortcut-desc">快进 5 秒</span><span class="shortcut-key">→</span></div>
+                <div class="shortcut-row"><span class="shortcut-desc">切换 Rap 模式</span><span class="shortcut-key">C</span></div>
+            </div>
+            <div class="shortcut-close"><button onclick="toggleShortcutModal()">知道了</button></div>
+        </div>
+    </div>
+
     <script>
         let songs = [];
         let curIdx = -1;
         let curCharIdx = 0; 
         let lastTimestampValue = -1; 
+
+        // 快捷键弹窗开关
+        function toggleShortcutModal() {
+            const m = document.getElementById('shortcutModal');
+            m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
+        }
         let cacheActiveLine = null;
         let cacheActiveToken = null;
         let cacheActiveEol = null;
@@ -1312,7 +1350,7 @@
                 
                 let val = preciseNow;
 
-                // [V51 FIX] 使用 <= 强制递增
+                // 使用 <= 强制递增
                 if (val <= lastTimestampValue) {
                     val = lastTimestampValue + 0.001;
                 }
@@ -1491,7 +1529,7 @@
             const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
             link.download = songs[curIdx].name.replace(/\.[^/.]+$/, "") + ".lrc"; link.click();
         }
-        // [V69] 统一导出: 根据当前格式导出 LRC 或 TTML
+        // 统一导出: 根据当前格式导出 LRC 或 TTML
         function saveOutputFile() {
             const s = songs[curIdx]; if (!s) return;
             if (currentFormat === 'TTML') {
