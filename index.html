@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>歌词编辑器 - v73 Apple Music TTML 标准格式</title>
+    <style>
+        :root {
+            --primary: #1db954;    /* Spotify 绿 */
+            --bg: #f8fafc;
+            --dark: #262626;       /* 柔和深灰 */
+            --sidebar-w: 300px;
+            --accent: #3498db;
+            --ttml-accent: #9b59b6; /* 紫色代表 TTML */
+            --highlight: #f39c12;  /* 橘黄高亮 */
+            --highlight-bg: #fff3e0;
+            --tagged-color: #15803d; /* 已打点字色 */
+            --line-active-bg: #fff8e1; 
+            --line-active-border: #ff9800;
+            --text-main: #191414;
+        }
+
+        body { font-family: 'Segoe UI', -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; background-color: var(--bg); color: var(--text-main); overflow: hidden; }
+
+        /* 侧边栏 */
+        .sidebar { width: var(--sidebar-w); background-color: var(--dark); color: white; display: flex; flex-direction: column; z-index: 100; box-shadow: 4px 0 10px rgba(0,0,0,0.1); }
+        .top-controls { padding: 20px; display: flex; flex-direction: column; gap: 10px; background: rgba(255,255,255,0.02); }
+        .sidebar h2 { margin: 0 0 10px 0; font-size: 18px; font-weight: 800; color: var(--primary); text-align: center; }
+        
+        .btn-main { background: var(--primary); color: white; padding: 12px; border: none; border-radius: 25px; font-weight: bold; cursor: pointer; transition: 0.3s; font-size: 13px; }
+        .btn-main:hover { filter: brightness(1.1); transform: scale(1.01); }
+        .btn-main:disabled { background: #666; cursor: not-allowed; transform: none; filter: none; }
+        
+        .btn-sub-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .btn-sub { background: rgba(255,255,255,0.08); color: white; padding: 10px; border: none; border-radius: 20px; cursor: pointer; font-size: 11px; }
+
+        .mode-switch-group { display: flex; flex-direction: column; gap: 8px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 12px; }
+        .mode-switch { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+        
+        /* [V56] 倍速选择器样式 */
+        .speed-control { display: flex; align-items: center; justify-content: space-between; font-size: 12px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.1); margin-top: 4px; }
+        .speed-select {
+            background: #333; color: white; border: 1px solid #555; padding: 2px 5px; border-radius: 4px; font-size: 11px; outline: none; cursor: pointer;
+        }
+        .speed-select:hover { border-color: var(--primary); }
+
+        /* [V69] 格式选择器样式 */
+        .format-selector { display: flex; gap: 0; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.15); }
+        .format-option { flex: 1; text-align: center; padding: 7px 0; font-size: 11px; font-weight: 700; cursor: pointer; transition: 0.25s; background: rgba(255,255,255,0.04); color: #999; letter-spacing: 0.5px; user-select: none; }
+        .format-option.active-lrc { background: var(--accent); color: white; }
+        .format-option.active-ttml { background: var(--ttml-accent); color: white; }
+        .format-option:hover:not(.active-lrc):not(.active-ttml) { background: rgba(255,255,255,0.1); color: #ccc; }
+        .ttml-locked-hint { font-size: 10px; color: var(--ttml-accent); opacity: 0.8; margin-top: -2px; text-align: right; display: none; }
+
+        .switch { position: relative; width: 34px; height: 18px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #535353; transition: .4s; border-radius: 20px; }
+        .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--primary); }
+        input:checked + .slider:before { transform: translateX(16px); }
+
+        /* 文件列表 */
+        .file-list { flex: 1; overflow-y: auto; padding: 15px; }
+        .file-item { position: relative; padding: 12px 35px 12px 12px; margin-bottom: 8px; background: rgba(255,255,255,0.04); border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: 0.2s; }
+        .file-item.active { background: rgba(29, 185, 84, 0.12); border-color: var(--primary); }
+        .file-name { font-size: 12px; color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+        .file-item.active .file-name { color: white; }
+        .btn-close-item { position: absolute; top: 8px; right: 10px; color: #666; font-size: 18px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-close-item:hover { color: #ff4d4d; }
+
+        /* 主区域 */
+        .main { flex: 1; display: flex; flex-direction: column; background: white; }
+        .header { padding: 15px 35px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+        
+        /* [V54 优化] 计时器性能优化 */
+        #timer { 
+            font-family: 'Consolas', monospace; 
+            font-size: 22px; 
+            color: var(--primary); 
+            font-weight: 800;
+            contain: content;        /* 隔离渲染范围 */
+            will-change: content;    /* 提示浏览器该元素内容会高频变化 */
+            min-width: 120px;        /* 固定宽度，防止数字变化导致居中抖动 */
+            text-align: right;
+        }
+
+        .editor-box { flex: 1; padding: 20px; display: flex; flex-direction: column; overflow: hidden; background: #fafafa; }
+        #lyricsInput { flex: 1; padding: 20px; font-size: 16px; border: 1px solid #e0e0e0; border-radius: 12px; resize: none; outline: none; }
+        
+        #tagView { display: none; flex: 1; overflow-y: auto; padding: 20px; background: white; border-radius: 12px; border: 1px solid #eee; scroll-behavior: smooth; }
+        
+        /* 歌词排版 */
+        .lyric-group { margin-bottom: 15px; border-bottom: 1px solid #f1f2f6; padding-bottom: 10px; }
+        .lyric-line { 
+            padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; 
+            border-radius: 8px; border-left: 5px solid transparent; margin-bottom: 4px; 
+            min-height: 48px; box-sizing: border-box; 
+        }
+
+        /* 模式样式 */
+        .verbatim-mode .lyric-line.active { background: #f6fcf8; border-left-color: var(--primary); }
+        .verbatim-mode .line-content { font-size: 22px; font-weight: 600; color: #121212; }
+
+        .line-mode .lyric-line.active { background: var(--line-active-bg); border-left-color: var(--line-active-border); }
+        .line-mode .line-content { font-size: 18px; font-weight: 500; color: #2d3436; }
+
+        .line-content { flex: 1; display: flex; flex-wrap: wrap; align-items: center; transition: font-size 0.2s; }
+        .slave-line .line-content { font-size: 16px !important; color: #636e72; font-weight: 500; }
+        .slave-line { padding-left: 140px; margin-top: -12px; opacity: 0.8; }
+
+        .timestamp-label { 
+            font-family: 'Consolas', monospace; 
+            color: var(--primary); 
+            width: 110px; 
+            font-weight: bold; 
+            font-size: 14px; 
+            flex-shrink: 0; 
+            cursor: pointer;        
+            user-select: none;      
+            transition: opacity 0.2s;
+        }
+
+        .timestamp-label:hover { opacity: 0.7; text-decoration: underline; }
+        
+        .char-token { padding: 2px 4px; border-radius: 4px; color: #d1d1d1; transition: 0.1s; cursor: pointer; }
+        .char-token.tagged { color: var(--tagged-color); font-weight: normal; background-color: #dcfce7; }
+        .char-token.current { 
+            color: var(--highlight) !important; 
+            background: var(--highlight-bg) !important; 
+            box-shadow: 0 2px 0 var(--highlight);
+            font-weight: normal;
+        }
+        .char-token.space-char { width: 14px; height: 24px; display: inline-block; background: #f1f5f9; margin: 0 2px; border-radius: 3px; }
+
+        /* [V70] Verse 选择器样式 */
+        .verse-selector {
+            display: none; /* 仅TTML模式显示 */
+            flex-shrink: 0;
+            margin-right: 8px;
+        }
+        .verse-selector select {
+            font-size: 11px;
+            padding: 2px 4px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #f8f9fa;
+            color: #555;
+            cursor: pointer;
+            outline: none;
+            min-width: 60px;
+        }
+        .verse-selector select:hover { border-color: var(--ttml-accent); }
+        .verse-selector select:focus { border-color: var(--ttml-accent); box-shadow: 0 0 0 2px rgba(155, 89, 182, 0.15); }
+        
+        /* Verse 标签颜色指示 */
+        .verse-indicator {
+            display: inline-block;
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 6px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .verse-v1 { background: #e3f2fd; color: #1565c0; }
+        .verse-v2 { background: #fce4ec; color: #c2185b; }
+        .verse-intro { background: #f3e5f5; color: #7b1fa2; }
+
+        /* 底部控制栏 */
+        .footer { height: 110px; padding: 0 40px; background: white; border-top: 1px solid #eee; display: flex; flex-direction: column; justify-content: center; }
+        .progress-container { width: 100%; display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }
+        .time-node { font-size: 11px; color: #888; width: 45px; font-family: monospace; }
+        
+        #progressBar { flex: 1; height: 4px; appearance: none; background: #eee; border-radius: 2px; outline: none; cursor: pointer; }
+        #progressBar::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--primary) var(--p, 0%), #eee var(--p, 0%)); height: 4px; }
+        #progressBar::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; background: white; border: 1px solid #ccc; border-radius: 50%; margin-top: -4px; transition: transform 0.1s; }
+        #progressBar:active::-webkit-slider-thumb { transform: scale(1.3); }
+
+        .controls-row { display: flex; align-items: center; justify-content: center; gap: 45px; }
+        .icon-btn { background: none; border: none; cursor: pointer; color: #555; transition: 0.2s; display: flex; align-items: center; justify-content: center; }
+        .icon-btn:hover { color: var(--primary); transform: scale(1.1); }
+        .icon-btn svg { width: 28px; height: 28px; fill: currentColor; }
+        
+        .play-btn { background: white !important; color: #000 !important; width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1.5px solid #eee; }
+        .play-btn svg { width: 20px; height: 20px; }
+
+        /* 预览弹窗 */
+        #resultModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); display: none; justify-content: center; align-items: center; z-index: 10000; }
+        .modal-content { background: white; width: 85%; max-width: 900px; height: 80%; border-radius: 12px; display: flex; flex-direction: column; border: 1px solid #ddd; }
+        .modal-header { padding: 18px 25px; border-bottom: 1px solid #f5f5f5; display: flex; justify-content: space-between; align-items: center; }
+        #resultArea { flex: 1; margin: 20px; padding: 20px; font-family: 'Consolas', monospace; font-size: 14px; border: 1px solid #f5f5f5; background: #fafafa; color: #333; border-radius: 8px; line-height: 1.7; resize: none; outline: none; }
+        .modal-footer { padding: 15px 25px; border-top: 1.5px solid #f5f5f5; display: flex; justify-content: flex-end; gap: 12px; }
+
+        .eol-hint { color: var(--highlight); font-size: 12px; margin-left: 8px; border: 1px solid var(--highlight); padding: 1px 5px; border-radius: 4px; font-weight: bold; background: var(--highlight-bg); }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="top-controls">
+            <h2>歌词编辑器</h2>
+            <div class="mode-switch-group">
+                <div class="format-selector" id="formatSelector">
+                    <div class="format-option active-lrc" id="fmtLrc" onclick="setFormat('LRC')">LRC</div>
+                    <div class="format-option" id="fmtTtml" onclick="setFormat('TTML')">TTML</div>
+                </div>
+                <div class="mode-switch">
+                    <span>逐字模式</span>
+                    <label class="switch"><input type="checkbox" id="verbatimToggle"><span class="slider"></span></label>
+                </div>
+                <span class="ttml-locked-hint" id="ttmlLockedHint">TTML 模式已锁定逐字</span>
+                <div class="mode-switch">
+                    <span>Rap 模式 (C)</span>
+                    <label class="switch"><input type="checkbox" id="rapToggle"><span class="slider"></span></label>
+                </div>
+                <div class="speed-control">
+                    <span>播放倍速</span>
+                    <select id="speedSelect" class="speed-select">
+                        <option value="0.5">0.5x (慢速)</option>
+                        <option value="0.75">0.75x</option>
+                        <option value="1.0" selected>1.0x (正常)</option>
+                        <option value="1.25">1.25x</option>
+                        <option value="1.5">1.5x</option>
+                        <option value="2.0">2.0x</option>
+                    </select>
+                </div>
+            </div>
+            <input type="file" id="filePicker" multiple accept="audio/*" style="display:none">
+            <button class="btn-main" onclick="document.getElementById('filePicker').click()">导入音频项目</button>
+            <div class="btn-sub-group">
+                <button class="btn-sub" id="modeBtn" onclick="toggleMode()">开始制作</button>
+                <button class="btn-sub" onclick="copyResult()">预览结果</button>
+                <button class="btn-sub" id="exportBtn" onclick="saveOutputFile()" style="grid-column: span 2; background: var(--accent); font-weight:bold;">导出 .LRC</button>
+            </div>
+        </div>
+        <div class="file-list" id="fileList"></div>
+    </div>
+
+    <div class="main">
+        <div class="header">
+            <div id="fileTitle" style="font-weight: 600; color: #999;">载入音频以开始...</div>
+            <div id="timer">00:00.000</div>
+        </div>
+        <div class="editor-box">
+            <textarea id="lyricsInput" placeholder="在这里粘贴歌词文本..."></textarea>
+            <div id="tagView"></div>
+        </div>
+        
+        <div class="footer">
+            <div class="progress-container">
+                <span class="time-node" id="curTimeText">00:00</span>
+                <input type="range" id="progressBar" value="0" min="0" step="0.001">
+                <span class="time-node" id="totalTimeText">00:00</span>
+            </div>
+            <div class="controls-row">
+                <button class="icon-btn" onclick="seekAudio(-5)" title="快退 5 秒">
+                    <svg viewBox="0 0 24 24"><path d="M12.5 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6c-1.66 0-3.17-.67-4.24-1.76l-1.41 1.41C7.71 20.03 9.71 21 12.5 21c4.97 0 9-4.03 9-9s-4.03-9-9-9z"/><text x="12.5" y="15.5" font-size="7" font-weight="bold" text-anchor="middle" fill="currentColor">5</text></svg>
+                </button>
+                <button class="icon-btn play-btn" id="playToggle" onclick="togglePlay()">
+                    <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    <svg id="pauseIcon" style="display:none" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                </button>
+                <button class="icon-btn" onclick="seekAudio(5)" title="快进 5 秒">
+                    <svg viewBox="0 0 24 24"><path d="M11.5 3c4.97 0 9 4.03 9 9H23l-3.89 3.89-.07.14L15 12h3c0-3.31-2.69-6-6-6s-6 2.69-6 6 2.69 6 6 6c1.66 0 3.17-.67 4.24-1.76l1.41 1.41C16.29 20.03 14.29 21 11.5 21c-4.97 0-9-4.03-9-9s4.03-9 9-9z"/><text x="11.5" y="15.5" font-size="7" font-weight="bold" text-anchor="middle" fill="currentColor">5</text></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="resultModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 style="margin:0; font-size:15px;">制作结果预览</h3>
+                <button onclick="closeModal()" style="border:none; background:none; cursor:pointer; font-size:24px; color:#bbb;">&times;</button>
+            </div>
+            <textarea id="resultArea"></textarea>
+            <div class="modal-footer">
+                <button class="btn-main" style="padding:10px 30px;" onclick="copyFromModal()">复制全部代码</button>
+                <button class="btn-sub" style="color:#888; border:1px solid #eee; background:transparent;" onclick="closeModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <audio id="audio" style="display:none"></audio>
+
+    <script>
+        let songs = [];
+        let curIdx = -1;
+        let curCharIdx = 0; 
+        let lastTimestampValue = -1; 
+        let cacheActiveLine = null;
+        let cacheActiveToken = null;
+        let cacheActiveEol = null;
+        let lastLineIdx = -1; 
+        let renderLoopId = null;
+        
+        let lastHitTime = 0;
+        let currentLineSpeeds = [];
+        
+        let syncedAudioTime = 0;        
+        let syncedPerfTime = 0;         
+        let isAudioPlaying = false;
+        let isDragging = false; 
+
+        // 缓存计时器字符串，避免重复 DOM 操作
+        let lastTimerStr = "";
+        
+        // [V69] 当前输出格式: 'LRC' 或 'TTML'
+        let currentFormat = 'LRC';
+
+        // [V67] 高精度时间获取方案
+        // 核心思路：按键瞬间同时采样 audio.currentTime 和 performance.now()，
+        // 用两者加权融合来消除各自的抖动：
+        //   - audio.currentTime: 精度约 ~15-20ms (受浏览器更新频率限制)，但长期不漂移
+        //   - performance.now() 推算: 精度 <1ms，但长期会和音频漂移
+        // 融合权重偏向 audio.currentTime，因为它是"真实"音频位置的唯一来源
+        
+        function getPreciseTime() {
+            if (!isAudioPlaying) return audio.currentTime;
+            
+            const now = performance.now();
+            
+            // 基于 performance.now 推算的时间
+            const realElapsed = (now - syncedPerfTime) / 1000;
+            const perfEstimate = syncedAudioTime + realElapsed * audio.playbackRate;
+            
+            // 直接采样 audio.currentTime
+            const audioNow = audio.currentTime;
+            
+            // 两者偏差
+            const drift = Math.abs(perfEstimate - audioNow);
+            
+            // 如果偏差过大（>0.5s），说明发生了 seek 或者卡顿，直接重新校准
+            if (drift > 0.5) {
+                syncTimeBase();
+                return audioNow;
+            }
+            
+            // 加权融合: audio.currentTime 权重 0.7, perf 推算 权重 0.3
+            // audio.currentTime 虽然更新频率低(粒度粗)，但它是真值
+            // perf 推算虽然平滑，但会累积误差
+            // 这样做的效果：大趋势跟随 audio，细节由 perf 平滑
+            return audioNow * 0.7 + perfEstimate * 0.3;
+        }
+        
+        // 每次按键时额外同步一次时间基准，减少推算误差累积
+        function syncOnKeyPress() {
+            syncedAudioTime = audio.currentTime;
+            syncedPerfTime = performance.now();
+        }
+        
+        function syncTimeBase() {
+            syncedAudioTime = audio.currentTime;
+            syncedPerfTime = performance.now();
+        } 
+        
+        function resetTimingState() {
+            lastTimestampValue = -1;
+            lastHitTime = 0;
+            currentLineSpeeds = [];
+            syncTimeBase();
+        }
+
+        const audio = document.getElementById('audio');
+        const lyricsInput = document.getElementById('lyricsInput');
+        const progressBar = document.getElementById('progressBar');
+        const tagView = document.getElementById('tagView');
+        const verbatimToggle = document.getElementById('verbatimToggle');
+        const rapToggle = document.getElementById('rapToggle');
+        const speedSelect = document.getElementById('speedSelect');
+
+        // [V56] 监听倍速改变
+        speedSelect.onchange = (e) => {
+            const rate = parseFloat(e.target.value);
+            audio.playbackRate = rate;
+            syncTimeBase(); // 变速时立即同步一次基准时间，防止跳变
+            
+            // 焦点归还给编辑器，防止空格键再次触发下拉框
+            if (document.activeElement) document.activeElement.blur();
+        };
+
+        // [V69] 格式切换: LRC / TTML
+        // [V70] 切换格式时重新渲染，显示/隐藏verse选择器
+        function setFormat(fmt) {
+            currentFormat = fmt;
+            const lrcEl = document.getElementById('fmtLrc');
+            const ttmlEl = document.getElementById('fmtTtml');
+            const exportBtn = document.getElementById('exportBtn');
+            const hint = document.getElementById('ttmlLockedHint');
+            
+            lrcEl.className = 'format-option' + (fmt === 'LRC' ? ' active-lrc' : '');
+            ttmlEl.className = 'format-option' + (fmt === 'TTML' ? ' active-ttml' : '');
+            
+            if (fmt === 'TTML') {
+                // TTML 模式: 自动启用逐字并锁定
+                verbatimToggle.checked = true;
+                verbatimToggle.disabled = true;
+                hint.style.display = 'block';
+                exportBtn.innerText = '导出 .TTML';
+                exportBtn.style.background = 'var(--ttml-accent)';
+            } else {
+                // LRC 模式: 解锁逐字开关
+                verbatimToggle.disabled = false;
+                hint.style.display = 'none';
+                exportBtn.innerText = '导出 .LRC';
+                exportBtn.style.background = 'var(--accent)';
+            }
+            
+            // [V70] 如果已在编辑模式，重新渲染以显示/隐藏verse选择器
+            const s = songs[curIdx];
+            if (s && s.isTagging) {
+                renderInitialTagView();
+            }
+        }
+
+        // [V73] TTML 时间格式转换: [mm:ss.xxx] → mm:ss.xxx (Apple Music 标准格式)
+        function convertToTTMLTime(lrcTimeStr) {
+            if (!lrcTimeStr) return "00:00.000";
+            const clean = lrcTimeStr.replace(/[\[\]]/g, '');
+            return clean; // LRC 的 mm:ss.xxx 格式与 Apple TTML 一致，直接去掉方括号即可
+        }
+
+        // [V73] 完全重写: 符合正规 Apple Music TTML 逐字歌词格式
+        // 参考: Apple Video and Audio Asset Guide - TTML File Format
+        // 参考: AMLL TTML Specification
+        function getTTMLOutput() {
+            const s = songs[curIdx]; if (!s || s.lines.length === 0) return "";
+            
+            // ====== 1. XML 声明 + <tt> 根元素 ======
+            let ttml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+            ttml += `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" itunes:timing="Word" xml:lang="zh">\n`;
+            
+            // ====== 2. <head> 部分: agent 声明 + iTunesMetadata ======
+            ttml += `<head>\n`;
+            ttml += `  <metadata>\n`;
+            ttml += `    <ttm:agent type="person" xml:id="v1"/>\n`;
+            ttml += `    <ttm:agent type="person" xml:id="v2"/>\n`;
+            ttml += `    <iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">\n`;
+            ttml += `      <songwriters>\n`;
+            ttml += `        <songwriter/>\n`;
+            ttml += `      </songwriters>\n`;
+            ttml += `    </iTunesMetadata>\n`;
+            ttml += `  </metadata>\n`;
+            ttml += `</head>\n`;
+            
+            // ====== 3. <body> 部分 ======
+            ttml += `<body>\n`;
+            
+            // --- 按 song-part (verse) 分组行，生成 <div> 块 ---
+            // 收集所有主行(非slave)的信息
+            const mainLines = [];
+            s.lines.forEach((l, i) => {
+                if (l.isSlave) return;
+                mainLines.push({ line: l, idx: i });
+            });
+            
+            // 将连续相同 verse 的行分到同一个 div
+            const divGroups = [];
+            let currentDiv = null;
+            mainLines.forEach(({ line, idx }) => {
+                const part = line.verse || '';
+                if (!currentDiv || currentDiv.part !== part) {
+                    currentDiv = { part: part, lines: [] };
+                    divGroups.push(currentDiv);
+                }
+                currentDiv.lines.push({ line, idx });
+            });
+            
+            // 行号计数器 (用于 itunes:key="L1", L2, ...)
+            let lineKeyCounter = 1;
+            
+            divGroups.forEach(group => {
+                // 计算 div 的 begin/end
+                const firstLine = group.lines[0].line;
+                const lastLine = group.lines[group.lines.length - 1].line;
+                
+                const divBegin = convertToTTMLTime(firstLine.time || (firstLine.tokens[0] ? firstLine.tokens[0].time : ''));
+                let divEnd;
+                if (lastLine.endTime) {
+                    divEnd = convertToTTMLTime(lastLine.endTime);
+                } else {
+                    divEnd = convertToTTMLTime(formatTime(audio.duration || 0));
+                }
+                
+                // itunes:song-part 映射 (仅 Intro)
+                const songPartMap = {
+                    'intro': 'Intro'
+                };
+                const songPartAttr = group.part && songPartMap[group.part] 
+                    ? ` itunes:song-part="${songPartMap[group.part]}"` 
+                    : '';
+                
+                ttml += `  <div begin="${divBegin}" end="${divEnd}"${songPartAttr}>\n`;
+                
+                group.lines.forEach(({ line: l, idx: i }) => {
+                    const lineStart = convertToTTMLTime(l.time || (l.tokens[0] ? l.tokens[0].time : ''));
+                    
+                    // 行结束时间
+                    let lineEnd;
+                    if (l.endTime) {
+                        lineEnd = convertToTTMLTime(l.endTime);
+                    } else {
+                        // 找下一个非slave行
+                        let nextMainIdx = -1;
+                        for (let j = i + 1; j < s.lines.length; j++) {
+                            if (!s.lines[j].isSlave) { nextMainIdx = j; break; }
+                        }
+                        lineEnd = nextMainIdx !== -1 
+                            ? convertToTTMLTime(s.lines[nextMainIdx].time) 
+                            : convertToTTMLTime(formatTime(audio.duration || 0));
+                    }
+                    
+                    // ttm:agent 属性 (仅 v1/v2)
+                    let agentAttr = "";
+                    if (l.verse === 'v1' || l.verse === 'v2') {
+                        agentAttr = ` ttm:agent="${l.verse}"`;
+                    }
+                    
+                    // itunes:key 行号
+                    const keyAttr = ` itunes:key="L${lineKeyCounter}"`;
+                    lineKeyCounter++;
+                    
+                    if (l.isVerbatim && l.tokens.length > 0) {
+                        // ====== 逐字模式 ======
+                        ttml += `    <p begin="${lineStart}" end="${lineEnd}"${agentAttr}${keyAttr}>`;
+                        
+                        // Apple 格式: 空格放在下一个有时间的 span 开头
+                        // 例: <span begin="..." end="...">Hello</span><span begin="..." end="..."> world</span>
+                        let pendingSpaces = "";
+                        
+                        l.tokens.forEach((tk, ti) => {
+                            const isSpace = /^\s+$/.test(tk.char);
+                            
+                            if (isSpace) {
+                                // 积累空格，等下一个非空格 token 时合并
+                                pendingSpaces += " ";
+                                return;
+                            }
+                            
+                            // 非空格 token
+                            const displayChar = pendingSpaces + tk.char;
+                            pendingSpaces = "";
+                            
+                            if (tk.time) {
+                                // 找此 token 的结束时间 = 下一个有时间标记的非空格 token 的开始时间
+                                let wEnd = lineEnd;
+                                for (let j = ti + 1; j < l.tokens.length; j++) {
+                                    if (l.tokens[j].time && !/^\s+$/.test(l.tokens[j].char)) {
+                                        wEnd = convertToTTMLTime(l.tokens[j].time);
+                                        break;
+                                    }
+                                }
+                                ttml += `<span begin="${convertToTTMLTime(tk.time)}" end="${wEnd}">${escapeXml(displayChar)}</span>`;
+                            } else {
+                                // 无时间标记的 token (不应该出现在正常逐字打点中，但作为兜底)
+                                ttml += `<span>${escapeXml(displayChar)}</span>`;
+                            }
+                        });
+                        
+                        ttml += `</p>\n`;
+                    } else {
+                        // ====== 非逐字行: 整行一个 <p> ======
+                        ttml += `    <p begin="${lineStart}" end="${lineEnd}"${agentAttr}${keyAttr}>${escapeXml(l.txt)}</p>\n`;
+                    }
+                });
+                
+                ttml += `  </div>\n`;
+            });
+            
+            ttml += `</body>\n</tt>`;
+            return ttml;
+        }
+        
+        // [V73] XML 特殊字符转义
+        function escapeXml(str) {
+            return str.replace(/&/g, '&amp;')
+                      .replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;')
+                      .replace(/"/g, '&quot;')
+                      .replace(/'/g, '&apos;');
+        }
+
+        async function nativeParseLyrics(file) {
+            const buffer = await file.arrayBuffer();
+            const view = new DataView(buffer);
+            const decoder = new TextDecoder('utf-8');
+            try {
+                if (decoder.decode(buffer.slice(0, 4)) === 'fLaC') return parseFlac(buffer, view, decoder);
+                if (decoder.decode(buffer.slice(0, 3)) === 'ID3') return parseId3v2(buffer, view, decoder);
+            } catch (e) { console.error("解析失败:", e); }
+            return "";
+        }
+
+        function parseFlac(buffer, view, decoder) {
+            let offset = 4; let isLast = false;
+            while (!isLast) {
+                const header = view.getUint8(offset); isLast = (header & 0x80) !== 0;
+                const type = header & 0x7F; const length = view.getUint32(offset, false) & 0x00FFFFFF;
+                offset += 4;
+                if (type === 4) {
+                    let ptr = offset; const vendorLen = view.getUint32(ptr, true); ptr += 4 + vendorLen;
+                    const commentCount = view.getUint32(ptr, true); ptr += 4;
+                    for (let i = 0; i < commentCount; i++) {
+                        const len = view.getUint32(ptr, true); ptr += 4;
+                        const comment = new TextDecoder().decode(buffer.slice(ptr, ptr + len));
+                        if (comment.toUpperCase().startsWith("LYRICS=")) return comment.substring(7);
+                        ptr += len;
+                    }
+                }
+                offset += length;
+            }
+            return "";
+        }
+
+        function parseId3v2(buffer, view, decoder) {
+            let offset = 10; const totalSize = (view.getUint8(6) << 21) | (view.getUint8(7) << 14) | (view.getUint8(8) << 7) | view.getUint8(9);
+            while (offset < totalSize) {
+                const frameID = decoder.decode(buffer.slice(offset, offset + 4)); const frameSize = view.getUint32(offset + 4, false);
+                offset += 10;
+                if (frameID === 'USLT') {
+                    const encoding = view.getUint8(offset);
+                    return new TextDecoder(encoding === 1 ? 'utf-16' : 'utf-8').decode(buffer.slice(offset + 5, offset + frameSize));
+                }
+                if (frameID === '\0\0\0\0') break;
+                offset += frameSize;
+            }
+            return "";
+        }
+
+        function formatTime(t) {
+            const m = Math.floor(t / 60).toString().padStart(2, '0');
+            const sec = (t % 60).toFixed(3).padStart(6, '0'); 
+            return `[${m}:${sec}]`;
+        }
+
+        function parseLrcTime(timeStr) {
+            if (!timeStr) return null;
+            const match = timeStr.match(/\[(\d+):(\d+)\.(\d+)\]/);
+            if (match) {
+                const msDiv = match[3].length === 3 ? 1000 : 100;
+                return parseInt(match[1]) * 60 + parseInt(match[2]) + parseInt(match[3]) / msDiv;
+            }
+            return null;
+        }
+
+        function smartTokenize(text) {
+            // [V58 越南语/彝语拼音支持版]
+            // 支持带变音符号的拉丁字母（越南语、彝语拼音、汉语拼音等）
+            
+            // 检测是否包含泰文
+            const hasThai = /[\u0E00-\u0E7F]/.test(text);
+            
+            if (hasThai) {
+                return tokenizeThai(text);
+            }
+            
+            // 改进的正则表达式，支持:
+            // 1. 缩写如 U.S.A.
+            // 2. 扩展拉丁字母单词（包括变音符号）:
+            //    - 基础拉丁字母: a-zA-Z
+            //    - 拉丁扩展字母: \u00C0-\u024F (包括 À-ÿ, Ā-ſ 等)
+            //    - 拉丁扩展附加: \u1E00-\u1EFF (越南语字母如 ả, ộ, ễ)
+            //    - 组合变音符号: \u0300-\u036F (声调符号等)
+            //    - 数字和撇号（包括多种撇号变体：' ' ' `）
+            //    - [V61] 连字符 - 支持 Ah-a-a-ah, well-known 等
+            // 3. 中文字符
+            // 4. 空格
+            // 5. 其他符号
+            // [V60] 允许单词以撇号开头，如 'Cause, 'bout, 'til 等英文缩写
+            // [V61] 支持连字符连接的单词
+            // [V62] 支持单词吸附结尾标点 (?, !, ,, .)
+            // [V63] 支持西语/拉丁语系前置标点 (¿, ¡) 及重音字符
+            // [V64] 支持纯数字序列作为单个token (如 20, 1920, 2024)
+            // [V65] 支持斜杠连接的名字作为单个token (如 Brown/Lukas, Graham/Christopher)
+            // [V67] 支持带千分位/小数点的数字整体token (如 10,000  3.14  1,000,000  $50)
+            //       数字模式: 可选货币符号 + 数字 + (逗号/句点 + 数字)* + 可选百分号/后缀
+            const regex = /((?:[a-zA-Z]\.){2,}[a-zA-Z]?|[¥$€£₩₹]?[0-9]+(?:[,，.][0-9]+)*[%‰]?|[''''`a-zA-Z\u00C0-\u024F\u1E00-\u1EFF\¿\¡][\u0300-\u036F]*[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF\u0300-\u036F''''`\-\/\?\!\,\.\¿\¡]*(?:[:：])?|[\u4e00-\u9fa5][:：]?|\s+|.)/g;
+            const matches = text.match(regex) || [];
+            return matches.map(m => ({ char: m, time: "" }));
+        }
+        
+        // [V57] 泰文音节分割函数 - 改进版
+        function tokenizeThai(text) {
+            const tokens = [];
+            let i = 0;
+            
+            // 泰文字符分类
+            const isThaiConsonant = (c) => c >= '\u0E01' && c <= '\u0E2E';
+            const isThaiLeadingVowel = (c) => c >= '\u0E40' && c <= '\u0E44'; // เ แ โ ใ ไ
+            const isThaiFollowingVowel = (c) => c >= '\u0E30' && c <= '\u0E3A';
+            const isThaiToneMark = (c) => c >= '\u0E48' && c <= '\u0E4B'; // ่ ้ ๊ ๋
+            const isThaiAboveBelowMark = (c) => c >= '\u0E47' && c <= '\u0E4E';
+            const isThaiDigit = (c) => c >= '\u0E50' && c <= '\u0E59';
+            const isThaiSpecial = (c) => c === '\u0E2F' || c === '\u0E46' || c === '\u0E4F' || c === '\u0E5A' || c === '\u0E5B';
+            const isThai = (c) => c >= '\u0E00' && c <= '\u0E7F';
+            const isEnglishOrNumber = (c) => /^[a-zA-Z0-9'''`]$/.test(c); // [V59] 支持多种撇号: ' ' ' `
+            const isChinese = (c) => c >= '\u4e00' && c <= '\u9fa5';
+            
+            // อ (U+0E2D) 作为元音载体时的处理
+            const isVowelCarrier = (c) => c === '\u0E2D'; // อ
+            
+            // 检测位置idx处是否开始一个新音节
+            const startsNewSyllable = (idx) => {
+                if (idx >= text.length) return true;
+                const c = text[idx];
+                // 前置元音开始新音节
+                if (isThaiLeadingVowel(c)) return true;
+                // 辅音后面跟着元音/声调标记，开始新音节
+                if (isThaiConsonant(c)) {
+                    if (idx + 1 < text.length) {
+                        const next = text[idx + 1];
+                        if (isThaiFollowingVowel(next) || isThaiToneMark(next) || isThaiAboveBelowMark(next)) {
+                            return true;
+                        }
+                        // อ 作为元音载体
+                        if (isVowelCarrier(next)) {
+                            return true;
+                        }
+                        // 辅音群检测 (ร ล ว 作为第二辅音)
+                        if (isThaiConsonant(next) && (next === '\u0E23' || next === '\u0E25' || next === '\u0E27')) {
+                            if (idx + 2 < text.length) {
+                                const afterCluster = text[idx + 2];
+                                if (isThaiFollowingVowel(afterCluster) || isThaiToneMark(afterCluster) || 
+                                    isThaiAboveBelowMark(afterCluster) || isVowelCarrier(afterCluster)) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                return false;
+            };
+            
+            while (i < text.length) {
+                const c = text[i];
+                
+                // 处理空格
+                if (/\s/.test(c)) {
+                    let space = '';
+                    while (i < text.length && /\s/.test(text[i])) {
+                        space += text[i];
+                        i++;
+                    }
+                    tokens.push({ char: space, time: "" });
+                    continue;
+                }
+                
+                // 处理英文单词
+                if (isEnglishOrNumber(c)) {
+                    let word = '';
+                    while (i < text.length && isEnglishOrNumber(text[i])) {
+                        word += text[i];
+                        i++;
+                    }
+                    if (i < text.length && (text[i] === ':' || text[i] === '：')) {
+                        word += text[i];
+                        i++;
+                    }
+                    tokens.push({ char: word, time: "" });
+                    continue;
+                }
+                
+                // 处理中文
+                if (isChinese(c)) {
+                    let char = c;
+                    i++;
+                    if (i < text.length && (text[i] === ':' || text[i] === '：')) {
+                        char += text[i];
+                        i++;
+                    }
+                    tokens.push({ char: char, time: "" });
+                    continue;
+                }
+                
+                // 处理泰文音节
+                if (isThai(c)) {
+                    let syllable = '';
+                    
+                    // 1. 收集前置元音 (เ แ โ ใ ไ) - 这些元音本身就包含了一个隐含的短元音
+                    let hasLeadingVowel = false;
+                    while (i < text.length && isThaiLeadingVowel(text[i])) {
+                        syllable += text[i];
+                        i++;
+                        hasLeadingVowel = true;
+                    }
+                    
+                    // 2. 收集初辅音
+                    if (i < text.length && isThaiConsonant(text[i])) {
+                        syllable += text[i];
+                        i++;
+                        
+                        // 检查辅音群 (กร, กล, กว, พร, พล etc.)
+                        // 但只有当辅音群后面紧跟元音标记时才认为是真正的辅音群
+                        if (i < text.length && isThaiConsonant(text[i]) && 
+                            (text[i] === '\u0E23' || text[i] === '\u0E25' || text[i] === '\u0E27')) {
+                            // 看第二辅音后面是什么
+                            if (i + 1 < text.length) {
+                                const afterSecond = text[i + 1];
+                                // 如果后面是元音标记，这是辅音群的一部分
+                                if (isThaiFollowingVowel(afterSecond) || isThaiToneMark(afterSecond) || 
+                                    isThaiAboveBelowMark(afterSecond) || isVowelCarrier(afterSecond)) {
+                                    syllable += text[i];
+                                    i++;
+                                }
+                                // 如果后面是另一个辅音，而且有前置元音，那么第二辅音也应该包含
+                                // (如 เพลง: เ-พล-ง，พล 是辅音群)
+                                else if (hasLeadingVowel && isThaiConsonant(afterSecond)) {
+                                    syllable += text[i];
+                                    i++;
+                                }
+                            } else if (hasLeadingVowel) {
+                                // 句末，有前置元音，包含第二辅音
+                                syllable += text[i];
+                                i++;
+                            }
+                        }
+                    }
+                    
+                    // 3. 收集所有跟随的元音、声调符号、上下标记
+                    while (i < text.length) {
+                        const nc = text[i];
+                        if (isThaiFollowingVowel(nc) || isThaiToneMark(nc) || isThaiAboveBelowMark(nc)) {
+                            syllable += nc;
+                            i++;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // 4. 处理 อ 作为元音的情况 (如 ขอ, รอ, คอ)
+                    if (i < text.length && isVowelCarrier(text[i])) {
+                        syllable += text[i];
+                        i++;
+                        // อ 后面可能跟尾辅音 (如 คอย 中的 ย)
+                        if (i < text.length && isThaiConsonant(text[i]) && startsNewSyllable(i + 1)) {
+                            syllable += text[i];
+                            i++;
+                        }
+                    }
+                    
+                    // 5. 收集尾辅音
+                    if (i < text.length && isThaiConsonant(text[i]) && !isVowelCarrier(text[i])) {
+                        if (startsNewSyllable(i + 1)) {
+                            syllable += text[i];
+                            i++;
+                        }
+                    }
+                    
+                    // 6. 处理泰文数字
+                    if (syllable === '' && isThaiDigit(c)) {
+                        while (i < text.length && isThaiDigit(text[i])) {
+                            syllable += text[i];
+                            i++;
+                        }
+                    }
+                    
+                    // 7. 泰文特殊符号单独处理
+                    if (syllable === '' && isThaiSpecial(c)) {
+                        syllable = c;
+                        i++;
+                    }
+                    
+                    // 如果还是空的，说明遇到了无法识别的泰文字符
+                    if (syllable === '') {
+                        syllable = c;
+                        i++;
+                    }
+                    
+                    tokens.push({ char: syllable, time: "" });
+                    continue;
+                }
+                
+                // 其他字符单独处理
+                tokens.push({ char: c, time: "" });
+                i++;
+            }
+            
+            return tokens;
+        }
+
+        document.getElementById('filePicker').onchange = async (e) => {
+            const files = Array.from(e.target.files);
+            for (const file of files) {
+                const lyrics = await nativeParseLyrics(file);
+                songs.push({ name: file.name, url: URL.createObjectURL(file), raw: lyrics, isTagging: false, lines: [], lastProgress: 0 });
+            }
+            renderList();
+            if (curIdx === -1) selectSong(songs.length - 1);
+            e.target.value = '';
+        };
+
+        function renderList() {
+            document.getElementById('fileList').innerHTML = songs.map((s, i) => `
+                <div class="file-item ${i === curIdx ? 'active' : ''}" onclick="selectSong(${i})">
+                    <span class="file-name">${s.name}</span>
+                    <span class="btn-close-item" onclick="event.stopPropagation(); deleteSong(${i})">&times;</span>
+                </div>
+            `).join('');
+        }
+
+        function selectSong(i) {
+            if (curIdx !== -1 && songs[curIdx]) {
+                songs[curIdx].raw = lyricsInput.value;
+                songs[curIdx].lastProgress = audio.currentTime;
+            }
+            
+            curIdx = i; const s = songs[curIdx];
+            document.getElementById('fileTitle').innerText = s.name;
+            
+            audio.pause();
+            stopRenderLoop(); 
+            audio.src = s.url; 
+            
+            // 重置倍速状态
+            audio.playbackRate = parseFloat(speedSelect.value);
+
+            resetTimingState();
+            cacheActiveLine = null; cacheActiveToken = null; cacheActiveEol = null;
+            lastLineIdx = -1;
+            
+            isAudioPlaying = false;
+            
+            const startPos = s.lastProgress || 0;
+            audio.currentTime = startPos;
+            updateProgressUI(startPos); 
+
+            lyricsInput.value = s.raw;
+            s.isTagging = false; lyricsInput.style.display = 'block'; tagView.style.display = 'none';
+            document.getElementById('modeBtn').innerText = "开始制作";
+            renderList();
+        }
+
+        function deleteSong(i) { 
+            if (i === curIdx) {
+                audio.pause();
+                stopRenderLoop();
+                audio.src = "";
+                audio.currentTime = 0;
+                updateProgressUI(0);
+                
+                curIdx = -1;
+                document.getElementById('fileTitle').innerText = "载入音频以开始...";
+                lyricsInput.value = "";
+                tagView.innerHTML = "";
+                lyricsInput.style.display = 'block'; 
+                tagView.style.display = 'none';
+                
+                songs.splice(i, 1);
+                renderList();
+                return;
+            }
+            
+            if (i < curIdx) {
+                curIdx--;
+            }
+            
+            songs.splice(i, 1);
+            renderList();
+        }
+
+        function toggleMode() {
+            const s = songs[curIdx]; if (!s) return;
+            resetTimingState();
+
+            if (!s.isTagging) {
+                const text = lyricsInput.value.trim(); if (!text) return alert("内容为空");
+                
+                // [V54/V55 优化] 先切换UI状态，让用户感觉到响应
+                const btn = document.getElementById('modeBtn');
+                btn.innerText = "处理中...";
+                btn.disabled = true;
+
+                // [V54/V55 优化] 异步执行繁重的渲染任务，避免卡死
+                setTimeout(() => {
+                    const isVerbatim = verbatimToggle.checked;
+                    tagView.className = isVerbatim ? "verbatim-mode" : "line-mode";
+
+                    const rawLines = text.split('\n');
+                    const processedLines = [];
+                    let lastOriginalTime = null;
+                    let currentGroupId = 0;
+
+                    rawLines.forEach(line => {
+                        const l = line.trim();
+                        if (/^\[[a-zA-Z]+:.*\]/.test(l)) return;
+
+                        const timeMatch = l.match(/^\[(\d{2}:\d{2}[\.:]\d{2,3})\]/);
+                        let originalTime = timeMatch ? timeMatch[0] : "";
+                        let cleanTxt = l.replace(/^\[\d{2}:\d{2}[\.:]\d{2,3}\]/, "").replace(/\[\d{2}:\d{2}[\.:]\d{2,3}\]/g, "").trim();
+                        if (!cleanTxt) return;
+
+                        let isSlave = false;
+                        if (originalTime && originalTime === lastOriginalTime) { isSlave = true; } 
+                        else { lastOriginalTime = originalTime; currentGroupId++; }
+
+                        const lineObj = {
+                            txt: cleanTxt,
+                            time: originalTime,
+                            originalTime,
+                            groupId: currentGroupId,
+                            isSlave: isSlave,
+                            isVerbatim: isVerbatim && !isSlave,
+                            tokens: (isVerbatim && !isSlave) ? smartTokenize(cleanTxt) : [],
+                            endTime: "",
+                            verse: ""  // [V70] TTML verse/section 标记
+                        };
+                        if (lineObj.isVerbatim && lineObj.tokens.length > 0) lineObj.tokens[0].time = originalTime;
+                        processedLines.push(lineObj);
+                    });
+
+                    s.lines = processedLines; s.curLine = 0; curCharIdx = 0; s.isTagging = true; lastLineIdx = -1;
+                    lyricsInput.style.display = 'none'; tagView.style.display = 'block';
+                    
+                    renderInitialTagView(); // 这里执行渲染
+
+                    // 恢复按钮状态
+                    btn.innerText = "重置制作";
+                    btn.disabled = false;
+                }, 10); // 短暂延迟，让UI先刷新
+            } else {
+                s.isTagging = false; lyricsInput.style.display = 'block';
+                tagView.style.display = 'none';
+                document.getElementById('modeBtn').innerText = "开始制作";
+            }
+        }
+
+        function renderInitialTagView() {
+            const s = songs[curIdx];
+            const isTTMLMode = currentFormat === 'TTML';
+            let html = ""; let currentGroup = -1;
+            s.lines.forEach((l, i) => {
+                if (l.groupId !== currentGroup) {
+                    if (currentGroup !== -1) html += '</div>';
+                    html += `<div class="lyric-group">`;
+                    currentGroup = l.groupId;
+                }
+                let contentHtml = "";
+                if (l.isVerbatim) {
+                    contentHtml = l.tokens.map((t, ti) => {
+                        const isSpace = /^\s+$/.test(t.char);
+                        const isTagged = t.time !== "" && (i < s.curLine || (i === s.curLine && ti < curCharIdx));
+                        return `<span id="tk-${i}-${ti}" class="char-token ${isTagged ? 'tagged' : ''} ${isSpace ? 'space-char' : ''}" onclick="jumpToToken(${i}, ${ti})">${isSpace ? '' : t.char}</span>`;
+                    }).join('');
+                    contentHtml += `<span id="eol-${i}" class="eol-hint" style="display:none;">[行尾]</span>`;
+                } else {
+                    contentHtml = `<span id="txt-${i}">${l.txt}</span>`;
+                }
+                
+                // [V73] Verse 选择器 (仅TTML模式且非slave行显示)
+                // V1/V2 = ttm:agent (歌手), 其余 = itunes:song-part (段落)
+                const verseSelector = (!l.isSlave && isTTMLMode) ? `
+                    <div class="verse-selector" style="display: flex;">
+                        <select id="verse-${i}" onchange="setLineVerse(${i}, this.value)">
+                            <option value="">--</option>
+                            <option value="v1" ${l.verse === 'v1' ? 'selected' : ''}>歌手1</option>
+                            <option value="v2" ${l.verse === 'v2' ? 'selected' : ''}>歌手2</option>
+                            <option value="intro" ${l.verse === 'intro' ? 'selected' : ''}>Intro</option>
+                        </select>
+                    </div>` : '';
+                
+                // [V70] Verse 指示标签
+                const verseIndicator = l.verse ? `<span class="verse-indicator verse-${l.verse}">${getVerseLabel(l.verse)}</span>` : '';
+                
+                html += `<div class="lyric-line ${l.isSlave ? 'slave-line' : ''}" id="l-${i}">
+                    ${!l.isSlave ? `<span class="timestamp-label" id="ts-${i}" onclick="${l.isVerbatim ? `jumpToToken(${i}, 0)` : `jumpToLine(${i})`}">${(l.isVerbatim ? (l.tokens[0]?.time || '[00:00.000]') : (l.time || '[00:00.000]'))}</span>` : ''}
+                    ${verseSelector}
+                    <div class="line-content" ondblclick="makeEditable(this, ${i})" onclick="event.stopPropagation()">${contentHtml}${verseIndicator}</div>
+                </div>`;
+            });
+            html += '</div>';
+            tagView.innerHTML = html;
+            cacheActiveLine = null; cacheActiveToken = null; cacheActiveEol = null;
+            updateUIState(true);
+        }
+        
+        // [V73] 获取verse的显示标签
+        function getVerseLabel(verse) {
+            const labels = {
+                'v1': '歌手1',
+                'v2': '歌手2',
+                'intro': 'Intro'
+            };
+            return labels[verse] || verse;
+        }
+        
+        // [V70] 设置行的verse标记
+        function setLineVerse(lineIdx, verse) {
+            const s = songs[curIdx];
+            if (!s || !s.lines[lineIdx]) return;
+            s.lines[lineIdx].verse = verse;
+            // 更新指示标签
+            const lineEl = document.getElementById(`l-${lineIdx}`);
+            if (lineEl) {
+                const contentEl = lineEl.querySelector('.line-content');
+                // 移除旧的指示标签
+                const oldIndicator = contentEl.querySelector('.verse-indicator');
+                if (oldIndicator) oldIndicator.remove();
+                // 添加新的指示标签
+                if (verse) {
+                    const indicator = document.createElement('span');
+                    indicator.className = `verse-indicator verse-${verse}`;
+                    indicator.textContent = getVerseLabel(verse);
+                    contentEl.appendChild(indicator);
+                }
+            }
+        }
+
+        function updateUIState(autoScroll = true) {
+            const s = songs[curIdx];
+            
+            if (cacheActiveLine) { cacheActiveLine.classList.remove('active'); cacheActiveLine = null; }
+            if (cacheActiveToken) { cacheActiveToken.classList.remove('current'); cacheActiveToken = null; }
+            if (cacheActiveEol) { 
+                cacheActiveEol.style.display = 'none'; 
+                cacheActiveEol.classList.remove('current'); 
+                cacheActiveEol = null; 
+            }
+
+            if(!s || !s.lines[s.curLine]) {
+                return;
+            }
+
+            const line = s.lines[s.curLine];
+            
+            cacheActiveLine = document.getElementById(`l-${s.curLine}`);
+            if (cacheActiveLine) cacheActiveLine.classList.add('active');
+
+            if (line && line.isVerbatim) {
+                if (curCharIdx < line.tokens.length) {
+                    cacheActiveToken = document.getElementById(`tk-${s.curLine}-${curCharIdx}`);
+                    if (cacheActiveToken) cacheActiveToken.classList.add('current');
+                } else if (!rapToggle.checked) {
+                    cacheActiveEol = document.getElementById(`eol-${s.curLine}`);
+                    if (cacheActiveEol) {
+                        cacheActiveEol.style.display = 'inline-block';
+                        cacheActiveEol.classList.add('current');
+                    }
+                }
+            }
+
+            if (cacheActiveLine && (autoScroll && s.curLine !== lastLineIdx)) {
+                lastLineIdx = s.curLine; 
+                requestAnimationFrame(() => {
+                    if (!cacheActiveLine) return;
+                    const targetScroll = cacheActiveLine.offsetTop - tagView.offsetTop - 120; 
+                    tagView.scrollTo({ top: targetScroll, behavior: 'auto' });
+                });
+            }
+        }
+
+        function makeEditable(el, index) {
+            const s = songs[curIdx]; const line = s.lines[index];
+            const backupHtml = el.innerHTML;
+            el.innerText = line.txt; 
+            el.contentEditable = true; 
+            el.focus();
+            el.style.width = "100%"; el.style.display = "block";
+
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+
+            el.onblur = () => {
+                el.contentEditable = false;
+                el.style.width = ""; el.style.display = "";
+                const updatedText = el.innerText.trim();
+                if (!updatedText || updatedText === line.txt) { el.innerHTML = backupHtml; } 
+                else { updateLineText(index, updatedText); }
+            };
+            el.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } };
+        }
+
+        function updateLineText(index, newText) {
+            const s = songs[curIdx]; const line = s.lines[index];
+            line.txt = newText;
+            if (line.isVerbatim) {
+                const oldTokens = [...line.tokens];
+                line.tokens = smartTokenize(newText).map((t, idx) => {
+                    const oldMatch = oldTokens[idx];
+                    return { char: t.char, time: (oldMatch && oldMatch.char === t.char) ? oldMatch.time : "" };
+                });
+            }
+            renderInitialTagView();
+        }
+
+        function jumpToToken(lIdx, tIdx) {
+            const s = songs[curIdx]; s.curLine = lIdx; curCharIdx = tIdx;
+            const time = s.lines[lIdx].tokens[tIdx].time;
+            const audioTime = parseLrcTime(time);
+            
+            if (audioTime !== null) {
+                audio.currentTime = audioTime;
+                resetTimingState();
+                lastHitTime = audioTime;
+                currentLineSpeeds = [];
+            }
+            updateUIState(true);
+        }
+
+        function jumpToLine(index) {
+            const s = songs[curIdx]; s.curLine = index;
+            const audioTime = parseLrcTime(s.lines[index].time);
+            
+            if (audioTime !== null) {
+                audio.currentTime = audioTime;
+                resetTimingState();
+                lastHitTime = audioTime;
+                currentLineSpeeds = [];
+            }
+            updateUIState(true);
+        }
+
+        function seekAudio(amount) {
+            if (document.activeElement) document.activeElement.blur();
+            const newTime = audio.currentTime + amount;
+            audio.currentTime = Math.max(0, Math.min(newTime, audio.duration));
+            
+            resetTimingState();
+            lastHitTime = audio.currentTime;
+            
+            updateProgressUI(audio.currentTime);
+        }
+
+        async function togglePlay() { 
+            if (document.activeElement) document.activeElement.blur();
+            try { 
+                if(audio.paused) { 
+                    await audio.play(); 
+                    startRenderLoop(); 
+                } else { 
+                    audio.pause(); 
+                    stopRenderLoop(); 
+                } 
+            } catch (e) { console.error(e); }
+        }
+
+        function startRenderLoop() {
+            if (renderLoopId) return;
+            let frameCount = 0;
+            const loop = () => {
+                frameCount++;
+                if (frameCount >= 30) {
+                    syncTimeBase();
+                    frameCount = 0;
+                }
+                updateProgressUI(audio.currentTime);
+                if (!audio.paused) renderLoopId = requestAnimationFrame(loop);
+            };
+            renderLoopId = requestAnimationFrame(loop);
+        }
+
+        function stopRenderLoop() {
+            if (renderLoopId) { cancelAnimationFrame(renderLoopId); renderLoopId = null; }
+        }
+
+        // [V54 优化] 使用缓存与 DOM 差量更新
+        function updateProgressUI(time) {
+            if (!isDragging) {
+                progressBar.value = time;
+                const p = (time / audio.duration) * 100;
+                progressBar.style.setProperty('--p', `${p}%`);
+            }
+            
+            // 只有秒数变了才更新左侧小时间，减少DOM操作
+            const shortTimeStr = formatShortTime(time);
+            if(document.getElementById('curTimeText').innerText !== shortTimeStr) {
+                document.getElementById('curTimeText').innerText = shortTimeStr;
+            }
+
+            // 主计时器优化
+            const timerStr = formatTime(time).replace(/[\[\]]/g, '');
+            if (timerStr !== lastTimerStr) {
+                document.getElementById('timer').innerText = timerStr;
+                lastTimerStr = timerStr;
+            }
+        }
+
+        progressBar.onmousedown = () => { isDragging = true; };
+        progressBar.ontouchstart = () => { isDragging = true; };
+
+        progressBar.oninput = () => { 
+            const val = parseFloat(progressBar.value);
+            document.getElementById('curTimeText').innerText = formatShortTime(val);
+            document.getElementById('timer').innerText = formatTime(val).replace(/[\[\]]/g, '');
+            const p = (val / audio.duration) * 100;
+            progressBar.style.setProperty('--p', `${p}%`);
+        };
+
+        progressBar.onchange = () => { 
+            audio.currentTime = progressBar.value; 
+            resetTimingState(); 
+            isDragging = false;
+        };
+
+        window.onkeydown = (e) => {
+            if (e.code === 'Space' && document.activeElement && document.activeElement.tagName === 'BUTTON') {
+                e.preventDefault(); document.activeElement.blur();
+            }
+
+            // [V67] 按键瞬间先同步时间基准，再采样，最大程度减少推算漂移
+            if (isAudioPlaying) syncOnKeyPress();
+            const preciseNow = getPreciseTime();
+            const isTyping = e.target.tagName === 'TEXTAREA' || e.target.isContentEditable;
+            if (isTyping || curIdx === -1) return;
+            if (e.code === 'KeyC') { e.preventDefault(); rapToggle.checked = !rapToggle.checked; updateUIState(true); return; }
+
+            const s = songs[curIdx];
+            if (e.code === 'Space' && s.isTagging) {
+                e.preventDefault();
+                
+                let val = preciseNow;
+
+                // [V51 FIX] 使用 <= 强制递增
+                if (val <= lastTimestampValue) {
+                    val = lastTimestampValue + 0.001;
+                }
+                lastTimestampValue = val;
+                
+                const timeStr = formatTime(val); 
+                const line = s.lines[s.curLine];
+                let lineChanged = false;
+
+                if (curCharIdx === 0) { currentLineSpeeds = []; lastHitTime = val; } 
+                else { const gap = val - lastHitTime; if (gap > 0 && gap < 1.5) currentLineSpeeds.push(gap); lastHitTime = val; }
+                const avgCadence = currentLineSpeeds.length > 0 ? (currentLineSpeeds.reduce((a, b) => a + b, 0) / currentLineSpeeds.length) : 0.25;
+
+                if (line.isVerbatim) {
+                    if (curCharIdx < line.tokens.length) {
+                        
+                        line.tokens[curCharIdx].time = timeStr;
+                        const currentTk = document.getElementById(`tk-${s.curLine}-${curCharIdx}`);
+                        if (currentTk) currentTk.classList.add('tagged');
+                        
+                        if (curCharIdx === 0) {
+                            s.lines.forEach((ol, oi) => {
+                                if (ol.groupId === line.groupId) {
+                                    ol.time = timeStr;
+                                    const ts = document.getElementById(`ts-${oi}`); if (ts) ts.innerText = timeStr;
+                                }
+                            });
+                        }
+
+                        if (rapToggle.checked && curCharIdx > 0 && /^\s+$/.test(line.tokens[curCharIdx-1].char)) {
+                            const prevTime = parseLrcTime(line.tokens[curCharIdx-2]?.time || line.time);
+                            if (prevTime) line.tokens[curCharIdx-1].time = formatTime(prevTime + (avgCadence * 0.8));
+                        }
+
+                        curCharIdx++;
+
+                        const isEnglishOrNumber = (c) => /^[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF'''`\-\?\!\,\.\¿\¡]+$/.test(c); // [V63] 支持西语重音字符
+                        
+                        // [V68] 检测整行是否为纯拉丁/非CJK文字（英文、西语、越南语等）
+                        // 如果是，则全部空格自动跳过，无需逐个判断前后token类型
+                        const isFullLatinLine = !/[\u4e00-\u9fa5\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF\u0E00-\u0E7F]/.test(line.txt);
+
+                        // [V49/V50 FIX] 上下文括号检测逻辑（仅中日韩混排行需要）
+                        let insideParens = false;
+                        if (!isFullLatinLine) {
+                            let hasOpen = false;
+                            for (let k = curCharIdx - 1; k >= 0; k--) {
+                                if (/[\(（]/.test(line.tokens[k].char)) { hasOpen = true; break; }
+                            }
+                            let hasClose = false;
+                            for (let k = curCharIdx + 1; k < line.tokens.length; k++) {
+                                if (/[\)）]/.test(line.tokens[k].char)) { hasClose = true; break; }
+                            }
+                            if (hasOpen && hasClose) insideParens = true;
+                        }
+
+                        while (curCharIdx < line.tokens.length) {
+                            const nextTok = line.tokens[curCharIdx];
+                            if (!/^\s+$/.test(nextTok.char)) break;
+
+                            let shouldSkip = false;
+                            
+                            if (rapToggle.checked || isFullLatinLine) {
+                                // Rap模式 或 纯拉丁行：全部空格自动跳过
+                                shouldSkip = true; 
+                            } else {
+                                let prevIsEng = false;
+                                let nextIsEng = false;
+
+                                if (curCharIdx > 0) {
+                                    const prevChar = line.tokens[curCharIdx - 1].char;
+                                    if (isEnglishOrNumber(prevChar)) prevIsEng = true;
+                                } else {
+                                    prevIsEng = true;
+                                }
+
+                                let lookAheadIdx = curCharIdx + 1;
+                                let foundNext = false;
+                                while(lookAheadIdx < line.tokens.length) {
+                                    const lookChar = line.tokens[lookAheadIdx].char;
+                                    if (!/^\s+$/.test(lookChar)) {
+                                        foundNext = true;
+                                        if (isEnglishOrNumber(lookChar)) nextIsEng = true;
+                                        break;
+                                    }
+                                    lookAheadIdx++;
+                                }
+                                if (!foundNext) nextIsEng = true; 
+
+                                // [V49 FIX] 如果空格处于括号内部，严禁自动跳过
+                                if (prevIsEng && nextIsEng && !insideParens) shouldSkip = true;
+                            }
+
+                            if (shouldSkip) {
+                                curCharIdx++;
+                            } else {
+                                break; 
+                            }
+                        }
+
+                        if (rapToggle.checked && curCharIdx === line.tokens.length) {
+                            const smartEOL = Math.max(0.1, avgCadence * 0.6);
+                            line.endTime = formatTime(val + smartEOL);
+                            s.curLine++; curCharIdx = 0;
+                            while(s.lines[s.curLine] && s.lines[s.curLine].isSlave) s.curLine++;
+                            lastTimestampValue = val + smartEOL; lineChanged = true;
+                        }
+                    } else {
+                        const eolTime = rapToggle.checked ? val : (val + 0.05); 
+                        line.endTime = formatTime(eolTime);
+                        s.curLine++; curCharIdx = 0;
+                        while(s.lines[s.curLine] && s.lines[s.curLine].isSlave) s.curLine++;
+                        lineChanged = true;
+                        if (rapToggle.checked) lastTimestampValue = eolTime;
+                    }
+                } else {
+                    const gid = line.groupId;
+                    s.lines.forEach((l, i) => { if(l.groupId === gid) { l.time = timeStr; const ts = document.getElementById(`ts-${i}`); if(ts) ts.innerText = timeStr; } });
+                    do { s.curLine++; } while (s.lines[s.curLine] && s.lines[s.curLine].isSlave);
+                    lineChanged = true;
+                }
+
+                updateUIState(true);
+            }
+            if (e.key.toLowerCase() === 'p') { e.preventDefault(); togglePlay(); }
+            if (e.key === 'ArrowLeft') { e.preventDefault(); seekAudio(-5); }
+            if (e.key === 'ArrowRight') { e.preventDefault(); seekAudio(5); }
+        };
+
+        audio.onplay = () => { 
+            document.getElementById('playIcon').style.display='none'; 
+            document.getElementById('pauseIcon').style.display='block'; 
+            isAudioPlaying = true;
+            syncTimeBase();
+            startRenderLoop(); 
+        };
+        audio.onpause = () => { 
+            document.getElementById('playIcon').style.display='block'; 
+            document.getElementById('pauseIcon').style.display='none'; 
+            isAudioPlaying = false;
+            stopRenderLoop(); 
+        };
+        audio.onloadedmetadata = () => { 
+            progressBar.max = audio.duration; document.getElementById('totalTimeText').innerText = formatShortTime(audio.duration);
+            if (curIdx !== -1) audio.currentTime = songs[curIdx].lastProgress || 0;
+            updateProgressUI(audio.currentTime);
+        };
+        
+        function formatShortTime(t) { return Math.floor(t/60).toString().padStart(2,'0')+":"+Math.floor(t%60).toString().padStart(2,'0'); }
+
+        function getFinalOutput() {
+            const s = songs[curIdx]; if (!s || s.lines.length === 0) return "";
+            return s.lines.map(l => {
+                if (l.isVerbatim) {
+                    let res = ""; l.tokens.forEach(t => { 
+                        if (t.time) res += t.time; 
+                        res += t.char; 
+                    });
+                    // [V52 FIX] Only append end time if it exists (not empty), else nothing
+                    if (l.endTime) res += l.endTime;
+                    return res;
+                }
+                return (l.time || "[00:00.000]") + l.txt;
+            }).join('\n');
+        }
+        function copyResult() { 
+            const output = currentFormat === 'TTML' ? getTTMLOutput() : getFinalOutput();
+            if (!output) return alert("请先制作");
+            document.getElementById('resultArea').value = output;
+            document.getElementById('resultModal').style.display = 'flex';
+        }
+        function closeModal() { document.getElementById('resultModal').style.display = 'none'; }
+        function copyFromModal() { navigator.clipboard.writeText(document.getElementById('resultArea').value); alert("已复制"); closeModal(); }
+        function saveLrcFile() {
+            const blob = new Blob([getFinalOutput()], { type: 'text/plain' });
+            const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+            link.download = songs[curIdx].name.replace(/\.[^/.]+$/, "") + ".lrc"; link.click();
+        }
+        // [V69] 统一导出: 根据当前格式导出 LRC 或 TTML
+        function saveOutputFile() {
+            const s = songs[curIdx]; if (!s) return;
+            if (currentFormat === 'TTML') {
+                const output = getTTMLOutput();
+                if (!output) return alert("请先制作歌词");
+                const blob = new Blob([output], { type: 'application/ttml+xml' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = s.name.replace(/\.[^/.]+$/, "") + ".ttml";
+                link.click();
+            } else {
+                saveLrcFile();
+            }
+        }
+        function deleteSong(i) { songs.splice(i, 1); if (curIdx === i) curIdx = -1; renderList(); }
+    </script>
+</body>
+</html>
